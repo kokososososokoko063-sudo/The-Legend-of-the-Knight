@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>أسطورة الفارس: معركة الزعيم</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Cairo', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #2b32b2, #1488cc);
+        }
+
+        /* واجهة المستخدم والقصة */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #hud {
+            display: flex;
+            justify-content: space-between;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px black;
+        }
+
+        /* شاشات القصة والبداية */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            pointer-events: auto;
+            z-index: 10;
+            transition: opacity 0.5s;
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        h1 {
+            font-size: 40px;
+            color: #ffd700;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px #ff8c00;
+        }
+
+        p {
+            font-size: 18px;
+            max-width: 80%;
+            line-height: 1.6;
+        }
+
+        .btn {
+            margin-top: 20px;
+            padding: 10px 30px;
+            background: linear-gradient(45deg, #ff416c, #ff4b2b);
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: 25px;
+            font-family: 'Cairo', sans-serif;
+            box-shadow: 0 4px 15px rgba(255, 75, 43, 0.4);
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+        }
+
+        /* تأثير الحوار */
+        .dialogue-box {
+            background: rgba(0,0,0,0.9);
+            border: 2px solid #fff;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 600px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="800" height="450"></canvas>
+    
+    <div id="ui-layer">
+        <div id="hud">
+            <span id="score">نقاط: 0</span>
+            <span id="level-display">المرحلة: 1</span>
+            <span id="health">❤️ x 3</span>
+        </div>
+    </div>
+
+    <div id="start-screen" class="overlay">
+        <h1>⚔️ أسطورة الفارس</h1>
+        <p>مملكة الظلال استيقظت... والوحوش احتلت القلاع الخمس.</p>
+        <p>استخدم الأسهم للحركة، و <b>SPACE</b> للقفز.</p>
+        <button class="btn" onclick="startGame()">ابدأ المغامرة</button>
+    </div>
+
+    <div id="cutscene-screen" class="overlay hidden">
+        <div class="dialogue-box">
+            <h2 id="cutscene-title" style="color:#00d2ff">فصل جديد</h2>
+            <p id="cutscene-text">...</p>
+            <button class="btn" onclick="nextLevel()">متابعة</button>
+        </div>
+    </div>
+
+    <div id="gameover-screen" class="overlay hidden">
+        <h1 style="color: #ff2b2b;">انتهت اللعبة!</h1>
+        <p>سقط الفارس في المعركة...</p>
+        <button class="btn" onclick="location.reload()">حاول مرة أخرى</button>
+    </div>
+
+    <div id="victory-screen" class="overlay hidden">
+        <h1 style="color: #00ff88;">🎉 انتصار ساحق! 🎉</h1>
+        <p>لقد هزمت زعيم الظلام وحررت المملكة!</p>
+        <button class="btn" onclick="location.reload()">العب مجدداً</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // إعدادات اللعبة
+    let gameState = 'START'; // START, PLAYING, CUTSCENE, GAMEOVER, VICTORY
+    let currentLevel = 0;
+    let score = 0;
+    
+    // الكاميرا
+    let cameraX = 0;
+
+    // المدخلات
+    const keys = { right: false, left: false, up: false };
+
+    // الكائنات
+    let player = {
+        x: 50, y: 200, width: 40, height: 40,
+        velX: 0, velY: 0,
+        speed: 5, jumpForce: 13,
+        grounded: false,
+        hp: 3,
+        facingRight: true,
+        sprite: "🛡️" // الفارس
+    };
+
+    let particles = [];
+    let enemies = [];
+    let projectiles = [];
+    let boss = null;
+    let platforms = [];
+    let portal = null;
+
+    // تصميم المراحل (1=أرض, 0=هواء, P=بوابة, E=عدو, L=حمم)
+    // 5 مراحل + مرحلة الزعيم
+    const levelsData = [
+        // المرحلة 1: الغابة (سهلة)
+        {
+            map: [
+                "11111111111111111111",
+                "10000000000000000001",
+                "10000000000000000P01",
+                "10011100011100011111",
+                "10000000000000000001",
+                "11000001100000000001",
+                "11111111111111111111"
+            ],
+            bg1: "#2b32b2", bg2: "#1488cc",
+            story: "لقد بدأت الرحلة. الغابة هادئة، لكن الحذر واجب."
+        },
+        // المرحلة 2: الجبال (قفزات)
+        {
+            map: [
+                "1111111111111111111111111",
+                "1000000000000000000000001",
+                "100000000000000E00000P001",
+                "1000111000001111111111111",
+                "1000000001000000000000001",
+                "110000001110000000E000001",
+                "1111111111111111111111111"
+            ],
+            bg1: "#616161", bg2: "#9bc5c3",
+            story: "الجبال وعرة. الوحوش الجبلية تحرس الطريق."
+        },
+        // المرحلة 3: الكهف المظلم
+        {
+            map: [
+                "111111111111111111111111111",
+                "100000000000000000000000001",
+                "1000000E000000000000000P001",
+                "101111111100001110001111111",
+                "100000000000010000000000001",
+                "100E00000001110000E00000001",
+                "111111LL111111111LL11111111"
+            ],
+            bg1: "#232526", bg2: "#414345",
+            story: "الكهف مليء بالمخاطر والحمم البركانية."
+        },
+        // المرحلة 4: القلعة المسكونة
+        {
+            map: [
+                "111111111111111111111111111111",
+                "1P0000000000000000000000000001",
+                "111110000000000000000000000001",
+                "100000001110000E00000111000001",
+                "100000000000001110000000000001",
+                "1000E0000000100000000000E00001",
+                "111111111111111111111111111111"
+            ],
+            bg1: "#200122", bg2: "#6f0000",
+            story: "أنت قريب من غرفة العرش. الحراس في كل مكان!"
+        },
+        // المرحلة 5: ما قبل الزعيم (صعبة)
+        {
+            map: [
+                "111111111111111111111111111111",
+                "1000000000000000000000000000P1",
+                "100110011000000000000000001111",
+                "100000000001110000E00001110001",
+                "100000000000000011111000000001",
+                "1100E0000E00000000000000000001",
+                "11111LL111LL111111111111111111"
+            ],
+            bg1: "#000000", bg2: "#434343",
+            story: "الباب الكبير أمامك. استعد للمعركة النهائية!"
+        },
+        // المرحلة 6: الزعيم
+        {
+            map: [
+                "11111111111111111111",
+                "10000000000000000001",
+                "10000000000000000001",
+                "10000000000000000001",
+                "10000000000000000001",
+                "10000000000000000001",
+                "11111111111111111111"
+            ],
+            bg1: "#3e0000", bg2: "#ff0000",
+            story: "الزعيم: التنين المظلم!"
+        }
+    ];
+
+    // الاستماع للوحة المفاتيح
+    document.addEventListener('keydown', (e) => {
+        if(e.code === 'ArrowRight') keys.right = true;
+        if(e.code === 'ArrowLeft') keys.left = true;
+        if(e.code === 'Space' || e.code === 'ArrowUp') {
+            keys.up = true;
+            if(player.grounded && gameState === 'PLAYING') {
+                player.velY = -player.jumpForce;
+                player.grounded = false;
+                createParticles(player.x + player.width/2, player.y + player.height, '#fff', 5);
+            }
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if(e.code === 'ArrowRight') keys.right = false;
+        if(e.code === 'ArrowLeft') keys.left = false;
+        if(e.code === 'Space' || e.code === 'ArrowUp') keys.up = false;
+    });
+
+    // تهيئة المرحلة
+    function initLevel(levelIndex) {
+        if (levelIndex >= levelsData.length) {
+            // فوز
+            gameState = 'VICTORY';
+            document.getElementById('victory-screen').classList.remove('hidden');
+            return;
+        }
+
+        currentLevel = levelIndex;
+        
+        // عرض القصة (Cutscene)
+        if (gameState !== 'BOSS_FIGHT') {
+             showCutscene(levelsData[currentLevel].story);
+        }
+
+        // بناء الخريطة
+        platforms = [];
+        enemies = [];
+        projectiles = [];
+        boss = null;
+        portal = null;
+        player.x = 50; player.y = 100; player.velX = 0; player.velY = 0;
+
+        const map = levelsData[levelIndex].map;
+        const tileSize = 40;
+
+        for (let row = 0; row < map.length; row++) {
+            for (let col = 0; col < map[row].length; col++) {
+                const char = map[row][col];
+                const x = col * tileSize;
+                const y = row * tileSize;
+
+                if (char === '1') platforms.push({ x, y, width: tileSize, height: tileSize, type: 'ground' });
+                if (char === 'L') platforms.push({ x, y, width: tileSize, height: tileSize, type: 'lava' });
+                if (char === 'P') portal = { x, y, width: tileSize, height: tileSize };
+                if (char === 'E') enemies.push({ x, y, width: 40, height: 40, velX: 2, range: 100, startX: x, sprite: "👾" });
+            }
+        }
+
+        // إعداد الزعيم
+        if (levelIndex === 5) { // Boss Level
+            boss = {
+                x: 600, y: 150, width: 100, height: 100,
+                hp: 20, maxHp: 20,
+                dir: -1, timer: 0,
+                sprite: "🐲"
+            };
+        }
+
+        document.getElementById('level-display').innerText = `المرحلة: ${levelIndex + 1}`;
+    }
+
+    function showCutscene(text) {
+        gameState = 'CUTSCENE';
+        const screen = document.getElementById('cutscene-screen');
+        const txt = document.getElementById('cutscene-text');
+        screen.classList.remove('hidden');
+        txt.innerText = "";
+        
+        // تأثير الكتابة
+        let i = 0;
+        const speed = 30;
+        function typeWriter() {
+            if (i < text.length) {
+                txt.innerHTML += text.charAt(i);
+                i++;
+                setTimeout(typeWriter, speed);
+            }
+        }
+        typeWriter();
+    }
+
+    function startGame() {
+        document.getElementById('start-screen').classList.add('hidden');
+        initLevel(0);
+    }
+
+    function nextLevel() {
+        document.getElementById('cutscene-screen').classList.add('hidden');
+        gameState = 'PLAYING';
+    }
+
+    // الفيزياء والتحديث
+    function update() {
+        if (gameState !== 'PLAYING') return;
+
+        // حركة اللاعب
+        if (keys.right) {
+            player.velX += 1;
+            player.facingRight = true;
+        }
+        if (keys.left) {
+            player.velX -= 1;
+            player.facingRight = false;
+        }
+
+        player.velX *= 0.8; // Friction
+        player.velY += 0.8; // Gravity
+
+        player.x += player.velX;
+        player.y += player.velY;
+
+        // تصادم اللاعب مع المنصات
+        player.grounded = false;
+        for (let p of platforms) {
+            if (colCheck(player, p)) {
+                if (p.type === 'lava') {
+                    takeDamage();
+                } else {
+                    // تصادم بسيط
+                    if (player.velY > 0 && player.y + player.height < p.y + player.velY + 10) {
+                        player.grounded = true;
+                        player.velY = 0;
+                        player.y = p.y - player.height;
+                    }
+                }
+            }
+        }
+
+        // حدود العالم
+        if (player.y > canvas.height) takeDamage();
+
+        // البوابة
+        if (portal && colCheck(player, portal)) {
+            initLevel(currentLevel + 1);
+        }
+
+        // الأعداء
+        enemies.forEach((enemy, index) => {
+            enemy.x += enemy.velX;
+            if (enemy.x > enemy.startX + enemy.range || enemy.x < enemy.startX - enemy.range) {
+                enemy.velX *= -1;
+            }
+            // قتل العدو بالقفز عليه
+            if (colCheck(player, enemy)) {
+                if (player.velY > 0 && player.y + player.height - player.velY < enemy.y + 10) {
+                    player.velY = -8; // ارتداد
+                    enemies.splice(index, 1);
+                    createParticles(enemy.x, enemy.y, '#aa00ff', 10);
+                    score += 100;
+                    document.getElementById('score').innerText = `نقاط: ${score}`;
+                } else {
+                    takeDamage();
+                }
+            }
+        });
+
+        // الزعيم
+        if (boss) {
+            boss.timer++;
+            // حركة الزعيم
+            if (boss.timer % 100 === 0) {
+                boss.dir *= -1;
+            }
+            boss.x += boss.dir * 2;
+
+            // إطلاق النار
+            if (boss.timer % 120 === 0) {
+                projectiles.push({x: boss.x, y: boss.y + 50, velX: -5, type: 'fire'});
+            }
+
+            // ضرب الزعيم
+            if (colCheck(player, boss)) {
+                if (player.velY > 0) {
+                    player.velY = -10;
+                    boss.hp--;
+                    createParticles(boss.x + 50, boss.y + 50, '#ff0000', 5);
+                    if (boss.hp <= 0) {
+                        boss = null;
+                        setTimeout(() => initLevel(6), 1000); // الفوز
+                    }
+                } else {
+                    takeDamage();
+                }
+            }
+        }
+
+        // المقذوفات
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            let proj = projectiles[i];
+            proj.x += proj.velX;
+            if (colCheck(player, {x: proj.x, y: proj.y, width: 20, height: 20})) {
+                takeDamage();
+                projectiles.splice(i, 1);
+            }
+            if (proj.x < 0) projectiles.splice(i, 1);
+        }
+
+        // الجزيئات
+        particles.forEach((p, i) => {
+            p.x += p.velX;
+            p.y += p.velY;
+            p.life--;
+            if (p.life <= 0) particles.splice(i, 1);
+        });
+
+        // تحديث الكاميرا
+        let targetCamX = player.x - canvas.width / 2 + player.width / 2;
+        // تقييد الكاميرا
+        targetCamX = Math.max(0, targetCamX); 
+        cameraX += (targetCamX - cameraX) * 0.1;
+    }
+
+    function takeDamage() {
+        player.hp--;
+        document.getElementById('health').innerText = "❤️ x " + player.hp;
+        player.velY = -10; // ارتداد
+        player.velX = -10;
+        createParticles(player.x, player.y, '#ff0000', 15);
+        if (player.hp <= 0) {
+            gameState = 'GAMEOVER';
+            document.getElementById('gameover-screen').classList.remove('hidden');
+        }
+    }
+
+    // الرسم
+    function draw() {
+        // رسم الخلفية (تدرج لوني جميل)
+        const lvl = levelsData[currentLevel] || levelsData[0];
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, lvl.bg1);
+        gradient.addColorStop(1, lvl.bg2);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.translate(-cameraX, 0);
+
+        // رسم المنصات
+        platforms.forEach(p => {
+            if (p.type === 'lava') {
+                ctx.fillStyle = '#ff4b2b';
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = "red";
+            } else {
+                ctx.fillStyle = '#1e272e'; // لون الأرض
+                ctx.shadowBlur = 0;
+                // رسم زخرفة العشب
+                ctx.fillStyle = '#2ecc71';
+                ctx.fillRect(p.x, p.y, p.width, 5);
+                ctx.fillStyle = '#34495e';
+            }
+            ctx.fillRect(p.x, p.y + (p.type==='lava'?5:0), p.width, p.height);
+            ctx.shadowBlur = 0;
+        });
+
+        // رسم البوابة
+        if (portal) {
+            ctx.fillStyle = `rgba(0, 255, 255, ${Math.random()})`;
+            ctx.beginPath();
+            ctx.arc(portal.x + 20, portal.y + 20, 25, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.font = "30px Arial";
+            ctx.fillText("🌀", portal.x - 5, portal.y + 30);
+        }
+
+        // رسم اللاعب (إيموجي + توهج)
+        ctx.save();
+        if (!player.facingRight) {
+            ctx.translate(player.x + player.width, player.y);
+            ctx.scale(-1, 1);
+            ctx.fillText(player.sprite, 0, 35);
+        } else {
+            ctx.font = "35px Arial";
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "white";
+            ctx.fillText(player.sprite, player.x, player.y + 35);
+        }
+        ctx.restore();
+
+        // رسم الأعداء
+        ctx.font = "35px Arial";
+        enemies.forEach(e => {
+            ctx.fillText(e.sprite, e.x, e.y + 35);
+        });
+
+        // رسم الزعيم
+        if (boss) {
+            ctx.font = "100px Arial";
+            ctx.fillText(boss.sprite, boss.x, boss.y + 80);
+            // شريط صحة الزعيم
+            ctx.fillStyle = "red";
+            ctx.fillRect(boss.x, boss.y - 20, 100 * (boss.hp / boss.maxHp), 10);
+        }
+
+        // رسم المقذوفات
+        projectiles.forEach(proj => {
+            ctx.fillText("🔥", proj.x, proj.y);
+        });
+
+        // رسم الجزيئات
+        particles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+        });
+
+        ctx.restore();
+        requestAnimationFrame(loop);
+    }
+
+    function loop() {
+        update();
+        draw();
+    }
+
+    // أدوات مساعدة
+    function colCheck(shapeA, shapeB) {
+        return (shapeA.x < shapeB.x + shapeB.width &&
+                shapeA.x + shapeA.width > shapeB.x &&
+                shapeA.y < shapeB.y + shapeB.height &&
+                shapeA.y + shapeA.height > shapeB.y);
+    }
+
+    function createParticles(x, y, color, count) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x: x, y: y,
+                velX: (Math.random() - 0.5) * 10,
+                velY: (Math.random() - 0.5) * 10,
+                life: 30,
+                color: color,
+                size: Math.random() * 5
+            });
+        }
+    }
+
+    // بدء حلقة اللعبة
+    requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
